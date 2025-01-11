@@ -118,6 +118,23 @@ func Await(promise *Promise) (any, error) {
 	return nil, nil
 }
 
+func All(promises ...*Promise) *Promise {
+	return New(func(resolve Resolver, reject Rejector) {
+		results := make([]any, len(promises))
+		for _, promise := range promises {
+			promise.Then(func(result any) any {
+				results = append(results, result)
+				return result
+			}).Catch(func(err error) error {
+				reject(err)
+				return err
+			})
+		}
+
+		resolve(results)
+	})
+}
+
 var once sync.Once
 
 func init() {
