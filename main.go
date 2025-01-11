@@ -4,16 +4,16 @@ import (
 	"sync"
 )
 
-type State string
+type state string
 
 const (
-	StatePending  State = "PENDING"
-	StateResolved State = "RESOLVED"
-	StateRejected State = "REJECTED"
+	statePending  state = "PENDING"
+	stateResolved state = "RESOLVED"
+	stateRejected state = "REJECTED"
 )
 
 type result struct {
-	state State
+	state state
 	value any
 	err   error
 }
@@ -38,7 +38,7 @@ type Promise struct {
 func (p *Promise) poll() {
 	resolver := func(res ...any) result {
 		var r result
-		r.state = StateResolved
+		r.state = stateResolved
 		if len(res) > 0 {
 			r.value = res[0]
 		}
@@ -49,7 +49,7 @@ func (p *Promise) poll() {
 
 	rejector := func(err ...error) result {
 		var r result
-		r.state = StateRejected
+		r.state = stateRejected
 		if len(err) > 0 {
 			r.err = err[0]
 		}
@@ -107,11 +107,11 @@ func New(fn PromiseFn) *Promise {
 func Await(promise *Promise) (any, error) {
 	result := <-promise.result
 
-	if result.state == StateResolved {
+	if result.state == stateResolved {
 		return result.value, nil
 	}
 
-	if result.state == StateRejected {
+	if result.state == stateRejected {
 		return nil, result.err
 	}
 
