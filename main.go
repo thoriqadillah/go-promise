@@ -32,91 +32,80 @@ type CatchFn = func(err error) error
 
 type Promise struct {
 	fn     PromiseFn
-	result result
+	result chan result
 }
 
-func (p *Promise) poll() result {
-	resolver := func(result ...any) result {
-		p.result.state = StateResolved
-		if len(result) > 0 {
-			p.result.value = result[0]
+func (p *Promise) poll() {
+	resolver := func(res ...any) result {
+		var r result
+		r.state = StateResolved
+		if len(res) > 0 {
+			r.value = res[0]
 		}
 
-		return p.result
+		p.result <- r
+		return r
 	}
+
 	rejector := func(err ...error) result {
-		p.result.state = StateRejected
+		var r result
+		r.state = StateRejected
 		if len(err) > 0 {
-			p.result.err = err[0]
+			r.err = err[0]
 		}
 
-		return p.result
+		p.result <- r
+		return r
 	}
 
 	go p.fn(resolver, rejector)
-
-	return p.result
 }
 
 func (p *Promise) Then(resolve ThenFn) *Promise {
 	return New(func(_resolve Resolver, reject Rejector) {
-		value := resolve(p.result.value)
+		result := <-p.result
+		value := resolve(result.value)
 		_resolve(value)
 	})
 }
 
 func (p *Promise) Catch(reject CatchFn) *Promise {
 	return New(func(resolve Resolver, _reject Rejector) {
-		err := reject(p.result.err)
+		result := <-p.result
+		err := reject(result.err)
 		_reject(err)
 	})
 }
 
 type scheduler struct {
-	promises map[*Promise]bool
+	promises chan *Promise
 }
 
 func (r *scheduler) add(promise *Promise) {
-	r.promises[promise] = true
-}
-
-func (r *scheduler) done() bool {
-	return len(r.promises) == 0
-}
-
-func (r *scheduler) remove(promise *Promise) {
-	delete(r.promises, promise)
+	r.promises <- promise
 }
 
 func (r *scheduler) run() {
-	for !r.done() {
-		for promise := range r.promises {
-			result := promise.poll()
-			if result.state == StatePending {
-				continue
-			}
-			r.remove(promise)
-		}
+	for promise := range r.promises {
+		promise.poll()
 	}
 }
 
 var runner = &scheduler{
-	promises: make(map[*Promise]bool),
+	promises: make(chan *Promise),
 }
 
 func New(fn PromiseFn) *Promise {
 	promise := &Promise{
-		fn: fn,
-		result: result{
-			state: StatePending,
-		},
+		fn:     fn,
+		result: make(chan result),
 	}
 	runner.add(promise)
 	return promise
 }
 
 func Await(promise *Promise) (any, error) {
-	result := promise.poll()
+	result := <-promise.result
 
 	if result.state == StateResolved {
 		return result.value, nil
@@ -126,7 +115,6 @@ func Await(promise *Promise) (any, error) {
 		return nil, result.err
 	}
 
-	runner.remove(promise)
 	return nil, nil
 }
 

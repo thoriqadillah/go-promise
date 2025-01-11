@@ -11,7 +11,7 @@ import (
 func wait(ms int) *promise.Promise {
 	return promise.New(func(resolve promise.Resolver, reject promise.Rejector) {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
-		resolve()
+		resolve(fmt.Sprintf("waited for %d ms", ms))
 	})
 }
 
@@ -39,13 +39,13 @@ func main() {
 		}
 	}()
 
-	waitCall(1, 1000)
-	waitCall(2, 3000)
-	waitCall(3, 2000)
-	waitCall(4, 2000)
+	res, _ := promise.Await(wait(2000))
+	log.Println(res)
 
-	promise.Await(wait(2000))
-	log.Println("awaited wait done")
+	waitCall(1, 1000)
+	waitCall(3, 2000)
+	waitCall(2, 3000)
+	waitCall(4, 2000)
 
 	wg.Wait()
 }
