@@ -18,12 +18,25 @@ type result struct {
 	err   error
 }
 
-type future interface {
-	poll() result
+type channel struct {
+	listener []func(data ...any)
+	lock     sync.Mutex
 }
 
-type Resolver = func(result ...any) result
-type Rejector = func(err ...error) result
+func (e *channel) subscribe(fn func(data ...any)) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.listener = append(e.listener, fn)
+}
+
+func (e *channel) send(data ...any) {
+	for _, fn := range e.listener {
+		fn(data...)
+	}
+}
+
+type Resolver = func(result ...any)
+type Rejector = func(err ...error)
 
 type PromiseFn = func(resolve Resolver, reject Rejector)
 
@@ -31,49 +44,51 @@ type ThenFn = func(result any) any
 type CatchFn = func(err error) error
 
 type Promise struct {
-	fn     PromiseFn
-	result chan result
+	fn    PromiseFn
+	event *channel
 }
 
 func (p *Promise) poll() {
-	resolver := func(res ...any) result {
+	resolver := func(res ...any) {
 		var r result
 		r.state = stateResolved
 		if len(res) > 0 {
 			r.value = res[0]
 		}
 
-		p.result <- r
-		return r
+		p.event.send(r)
 	}
 
-	rejector := func(err ...error) result {
+	rejector := func(err ...error) {
 		var r result
 		r.state = stateRejected
 		if len(err) > 0 {
 			r.err = err[0]
 		}
 
-		p.result <- r
-		return r
+		p.event.send(r)
 	}
 
 	go p.fn(resolver, rejector)
 }
 
-func (p *Promise) Then(resolve ThenFn) *Promise {
-	return New(func(_resolve Resolver, reject Rejector) {
-		result := <-p.result
-		value := resolve(result.value)
-		_resolve(value)
+func (p *Promise) Then(then ThenFn) *Promise {
+	return New(func(resolve Resolver, reject Rejector) {
+		p.event.subscribe(func(data ...any) {
+			result := data[0].(result)
+			value := then(result.value)
+			resolve(value)
+		})
 	})
 }
 
-func (p *Promise) Catch(reject CatchFn) *Promise {
-	return New(func(resolve Resolver, _reject Rejector) {
-		result := <-p.result
-		err := reject(result.err)
-		_reject(err)
+func (p *Promise) Catch(catch CatchFn) *Promise {
+	return New(func(resolve Resolver, reject Rejector) {
+		p.event.subscribe(func(data ...any) {
+			result := data[0].(result)
+			err := catch(result.err)
+			reject(err)
+		})
 	})
 }
 
@@ -97,22 +112,36 @@ var runner = &scheduler{
 
 func New(fn PromiseFn) *Promise {
 	promise := &Promise{
-		fn:     fn,
-		result: make(chan result),
+		fn: fn,
+		event: &channel{
+			listener: make([]func(data ...any), 0),
+			lock:     sync.Mutex{},
+		},
 	}
 	runner.add(promise)
 	return promise
 }
 
 func Await(promise *Promise) (any, error) {
-	result := <-promise.result
+	var mu sync.Mutex
+	mu.Lock()
+	var r result
+	r.state = statePending
 
-	if result.state == stateResolved {
-		return result.value, nil
+	promise.event.subscribe(func(data ...any) {
+		r = data[0].(result)
+		mu.Unlock()
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if r.state == stateResolved {
+		return r.value, nil
 	}
 
-	if result.state == stateRejected {
-		return nil, result.err
+	if r.state == stateRejected {
+		return nil, r.err
 	}
 
 	return nil, nil

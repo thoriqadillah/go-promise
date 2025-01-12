@@ -40,7 +40,7 @@ func main() {
 	}()
 
 	res, _ := promise.Await(wait(2000))
-	log.Println(res)
+	log.Println("awaited", res)
 
 	waitCall(1, 1000)
 	waitCall(3, 2000)
